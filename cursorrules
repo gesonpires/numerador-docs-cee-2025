@@ -1,0 +1,97 @@
+# Cursor Rules — CEE-SC Enumerador de Documentos
+# Objetivo: padronizar a atuação do Cursor AI Pro neste repositório.
+
+[general]
+- Sempre **especificar o diretório** onde comandos devem rodar: use prefixos claros **[root]**, **[backend]**, **[frontend]**, **[infra]**.
+- Linguagem: **Português (Brasil)**. Estilo: direto, com exemplos e passos.
+- Stack: Node.js 20.x + TypeScript 5.x, Next.js (App Router), Tailwind, shadcn/ui, Fastify, Prisma/PostgreSQL.
+- Segurança: cookies httpOnly, RBAC básico, validação com Zod.
+- Qualidade: testes (Vitest/Jest) e e2e (Playwright) quando relevante.
+
+[conventional_commits]
+- `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`, `perf:`, `build:`
+- Exemplos:
+  - `feat(api): implementar reserva de número com lock transacional`
+  - `fix(ui): corrigir filtro por ano nas séries`
+  - `chore(db): adicionar índice por (series_id, year)`
+
+[folders]
+- Estrutura esperada:
+  - `backend/` — API (Fastify/Express) em TypeScript
+  - `frontend/` — Next.js 14 (App Router)
+  - `infra/` — Docker, docker-compose, scripts
+  - `docs/` — plan.md, env.md, diagramas, CSVs
+
+[commands]
+- Os comandos devem SEMPRE indicar o diretório. Exemplos:
+  - [infra] `docker compose up -d db`
+  - [backend] `pnpm prisma:migrate`
+  - [frontend] `pnpm dev`
+
+[api_rules]
+- Padrão REST base:
+  - `POST /numbers/reserve` body `{ seriesId, count?=1 }`
+  - `POST /numbers/issue/:id` body `{ metadata }`
+  - `POST /numbers/void/:id` body `{ reason }`
+  - `GET /numbers?seriesId&year&state&q&page`
+- **Concorrência**: usar transação e `SELECT ... FOR UPDATE` no `Counter` antes de incrementar `current_seq`.
+- **Validação**: Zod nos handlers. Respostas com `schema.parse()` e `reply.code(400)` em erros.
+
+[db_rules]
+- Prisma models mínimos:
+  - `Series`, `Counter (series_id, year, current_seq)`, `DocNumber`, `AuditLog`.
+  - Restrições: `UNIQUE(series_id, year)` em `Counter`; `UNIQUE(series_id, year, seq)` em `DocNumber`.
+- Seeds de exemplo para séries (ANÁLISE/CEDP, CI/PRES, RELATÓRIOS DE VISITAS/ANO…).
+
+[ui_rules]
+- Padrões shadcn/ui: `Button`, `Card`, `Input`, `Table`, `Badge`, `Dialog`, `Form`, `Toast`.
+- Páginas:
+  - Dashboard com cartões por série (próximo número, emitidos hoje, pendentes).
+  - Tela “Emitir número”: seleção de série, preview do formato, gerar e emitir.
+  - Histórico: filtros (tipo/sigla/ano/estado) e ações (anular, ver auditoria).
+  - CRUD de Séries com validador de formato (`#{seq}`, `#{sigla}`, `#{ano}`).
+
+[prompts]
+- scaffold-backend:
+  Você está no diretório [backend]. Crie a base Fastify (TypeScript) com:
+  - `src/server.ts` expondo `/health` e registrando rotas de números e séries.
+  - Zod para validar inputs.
+  - Prisma conectado ao Postgres (DATABASE_URL via .env).
+  - Scripts `dev`, `build`, `start`, `prisma:migrate` no package.json.
+  Dê o esqueleto dos arquivos e explique onde rodar cada comando.
+
+- prisma-schema:
+  Você está no diretório [backend]. Escreva o schema.prisma com os modelos:
+  User, Series, Counter, DocNumber, AuditLog.
+  Regras:
+  - UNIQUE(series_id, year) em Counter.
+  - UNIQUE(series_id, year, seq) em DocNumber.
+  - created_at/updated_at automáticos.
+  Inclua seed inicial para séries (ANÁLISE/CEDP; CI/PRES; RELATÓRIOS DE VISITAS/ANO).
+
+- endpoint-reserve:
+  Você está no diretório [backend]. Implemente `POST /numbers/reserve` com transação Prisma:
+  - Lock lógico no Counter (SELECT ... FOR UPDATE equivalente).
+  - Incremento atômico do current_seq.
+  - Criação de registros DocNumber no estado 'reservado'.
+  - Retorne os números com `formatted` conforme formato da série.
+  Inclua testes de concorrência básicos.
+
+- frontend-emitir:
+  Você está no diretório [frontend]. Crie a página /emitir:
+  - Select de Série (fetch /series).
+  - Preview do formato do próximo número.
+  - Botão 'Gerar e Emitir' que chama /numbers/reserve e /numbers/issue.
+  - Feedback via toast e atualização do histórico.
+
+- infra-compose:
+  Você está no diretório [infra]. Gere um docker-compose.yml com serviços:
+  - db (postgres:15, volume pgdata, porta 5432)
+  - api (build ../backend, depende de db, porta 3001)
+  - web (build ../frontend, depende de api, porta 3000)
+  Inclua healthcheck no db e rede compartilhada.
+
+[style]
+- TypeScript `strict: true`.
+- Lints: ESLint + Prettier.
+- Nomes claros, funções curtas, tratar erros explicitamente.

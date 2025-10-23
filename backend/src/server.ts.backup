@@ -1,0 +1,306 @@
+import Fastify from 'fastify';
+import cors from 'cors';
+import { PrismaClient } from '@prisma/client';
+
+// Configuração do logger
+const logger = {
+    level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
+    transport: process.env.NODE_ENV === 'development' ? {
+        target: 'pino-pretty',
+        options: {
+            colorize: true,
+            translateTime: 'HH:MM:ss Z',
+            ignore: 'pid,hostname'
+        }
+    } : undefined
+};
+
+// Inicialização do Fastify
+const fastify = Fastify({
+    logger
+});
+
+// Inicialização do Prisma
+const prisma = new PrismaClient();
+
+// Plugin de CORS
+fastify.register(require('@fastify/cors'), {
+    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    credentials: true
+});
+
+// Health check
+fastify.get('/health', async (request, reply) => {
+    try {
+        await prisma.$queryRaw`SELECT 1`;
+        return {
+            status: 'ok',
+            timestamp: new Date().toISOString(),
+            database: 'connected'
+        };
+    } catch (error) {
+        reply.code(503);
+        return {
+            status: 'error',
+            timestamp: new Date().toISOString(),
+            database: 'disconnected',
+            error: error instanceof Error ? error.message : 'Unknown error'
+        };
+    }
+});
+
+// Registro das rotas
+// fastify.register(require("./routes/auth"));
+// fastify.register(require("./routes/dashboard"));
+// fastify.register(require("./routes/series"));
+// fastify.register(require("./routes/numbers"));
+
+// Inicialização do servidor
+const start = async () => {
+    try {
+        const port = parseInt(process.env.PORT || '3001');
+        const host = process.env.HOST || '0.0.0.0';
+
+        await fastify.listen({ port, host });
+
+        fastify.log.info(`🚀 Servidor rodando em http://${host}:${port}`);
+        fastify.log.info(`📊 Health check disponível em http://${host}:${port}/health`);
+    } catch (err) {
+        fastify.log.error(err);
+        process.exit(1);
+    }
+};
+
+// Graceful shutdown
+process.on('SIGINT', async () => {
+    fastify.log.info('🛑 Encerrando servidor...');
+    await prisma.$disconnect();
+    await fastify.close();
+    process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+    fastify.log.info('🛑 Encerrando servidor...');
+    await prisma.$disconnect();
+    await fastify.close();
+    process.exit(0);
+});
+
+start();
+
+// Rota temporária para séries
+fastify.get('/api/series', async (request, reply) => {
+    try {
+        const series = await prisma.series.findMany({
+            where: { isActive: true },
+            orderBy: { name: 'asc' }
+        });
+        return { data: series };
+    } catch (error) {
+        reply.code(500);
+        return { error: 'Erro ao buscar séries' };
+    }
+});
+
+// Rota temporária para reservar números
+fastify.post('/api/numbers/reserve', async (request, reply) => {
+    try {
+        const { seriesId, count, metadata } = request.body as any;
+        
+        // Buscar a série
+        const series = await prisma.series.findUnique({
+            where: { id: seriesId }
+        });
+        
+        if (!series) {
+            reply.code(404);
+            return { error: 'Série não encontrada' };
+        }
+        
+        // Buscar ou criar counter para o ano atual
+        const currentYear = new Date().getFullYear();
+        let counter = await prisma.counter.findUnique({
+            where: { seriesId_year: { seriesId, year: currentYear } }
+        });
+        
+        if (!counter) {
+            counter = await prisma.counter.create({
+                data: { seriesId, year: currentYear, currentSeq: 0 }
+            });
+        }
+        
+        // Reservar números
+        const reservedNumbers = [];
+        for (let i = 0; i < count; i++) {
+            counter.currentSeq += 1;
+            const seq = counter.currentSeq;
+            
+            // Gerar número formatado
+            let formatted = series.formato;
+            formatted = formatted.replace(/#{seq:(\d+)}/g, (match, digits) => {
+                return seq.toString().padStart(parseInt(digits), '0');
+            });
+            formatted = formatted.replace(/#{sigla}/g, series.sigla);
+            formatted = formatted.replace(/#{ano}/g, currentYear.toString());
+            
+            const docNumber = await prisma.docNumber.create({
+                data: {
+                    seriesId,
+                    year: currentYear,
+                    seq,
+                    formatted,
+                    state: 'RESERVED',
+                    metadata: metadata || {},
+                    reservedAt: new Date()
+                }
+            });
+            
+            reservedNumbers.push(docNumber);
+        }
+        
+        // Atualizar counter
+        await prisma.counter.update({
+            where: { id: counter.id },
+            data: { currentSeq: counter.currentSeq }
+        });
+        
+        return { data: reservedNumbers };
+    } catch (error) {
+        reply.code(500);
+        return { error: 'Erro interno do servidor' };
+    }
+});
+
+// Rota temporária para emitir número
+fastify.post('/api/numbers/:id/issue', async (request, reply) => {
+    try {
+        const { id } = request.params as { id: string };
+        const { metadata } = request.body as any;
+        
+        // Buscar o número reservado
+        const docNumber = await prisma.docNumber.findUnique({
+            where: { id }
+        });
+        
+        if (!docNumber) {
+            reply.code(404);
+            return { error: 'Número não encontrado' };
+        }
+        
+        if (docNumber.state !== 'RESERVED') {
+            reply.code(400);
+            return { error: 'Número não está reservado' };
+        }
+        
+        // Emitir o número
+        const updatedNumber = await prisma.docNumber.update({
+            where: { id },
+            data: {
+                state: 'ISSUED',
+                metadata: metadata || {},
+                issuedAt: new Date()
+            }
+        });
+        
+        return updatedNumber;
+    } catch (error) {
+        reply.code(500);
+        return { error: 'Erro interno do servidor' };
+    }
+});
+
+// Rota temporária para estatísticas do dashboard
+fastify.get('/api/dashboard/stats', async (request, reply) => {
+    try {
+        const currentYear = new Date().getFullYear();
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        // Total de séries ativas
+        const totalSeries = await prisma.series.count({
+            where: { isActive: true }
+        });
+        
+        // Documentos emitidos hoje
+        const emittedToday = await prisma.docNumber.count({
+            where: {
+                state: 'ISSUED',
+                issuedAt: {
+                    gte: today
+                }
+            }
+        });
+        
+        // Documentos pendentes (reservados)
+        const pending = await prisma.docNumber.count({
+            where: { state: 'RESERVED' }
+        });
+        
+        // Total de documentos emitidos
+        const totalEmitted = await prisma.docNumber.count({
+            where: { state: 'ISSUED' }
+        });
+        
+        return {
+            totalSeries,
+            emittedToday,
+            pending,
+            totalEmitted
+        };
+    } catch (error) {
+        reply.code(500);
+        return { error: 'Erro interno do servidor' };
+    }
+});
+
+// Rota temporária para estatísticas por série
+
+// Rota temporária para buscar números (histórico)
+fastify.get('/api/numbers', async (request, reply) => {
+    try {
+        const { seriesId, year, state, q, page = 1, limit = 10 } = request.query as any;
+        
+        const where: any = {};
+        
+        if (seriesId) where.seriesId = seriesId;
+        if (year) where.year = parseInt(year);
+        if (state) where.state = state;
+        if (q) {
+            where.OR = [
+                { formatted: { contains: q } },
+                { metadata: { path: ['processo'], string_contains: q } },
+                { metadata: { path: ['interessado'], string_contains: q } },
+                { metadata: { path: ['assunto'], string_contains: q } }
+            ];
+        }
+        
+        const numbers = await prisma.docNumber.findMany({
+            where,
+            include: {
+                series: {
+                    select: { name: true, sigla: true }
+                }
+            },
+            orderBy: { createdAt: 'desc' },
+            skip: (page - 1) * limit,
+            take: parseInt(limit)
+        });
+        
+        const total = await prisma.docNumber.count({ where });
+        
+        return {
+            data: numbers,
+            pagination: {
+                page: parseInt(page),
+                limit: parseInt(limit),
+                total,
+                pages: Math.ceil(total / limit)
+            }
+        };
+    } catch (error) {
+        reply.code(500);
+        return { error: 'Erro interno do servidor' };
+    }
+});
+
+// Rota temporária para estatísticas por série

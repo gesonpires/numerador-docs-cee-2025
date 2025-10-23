@@ -1,0 +1,128 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  role      UserRole @default(READER)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relacionamentos
+  createdSeries Series[] @relation("SeriesCreatedBy")
+  reservedNumbers DocNumber[] @relation("NumbersReservedBy")
+  issuedNumbers DocNumber[] @relation("NumbersIssuedBy")
+  voidedNumbers DocNumber[] @relation("NumbersVoidedBy")
+  auditLogs AuditLog[]
+
+  @@map("users")
+}
+
+model Series {
+  id          String      @id @default(cuid())
+  name        String      // Ex: "ANÁLISE/CEDP"
+  tipo        String      // Ex: "ANÁLISE"
+  sigla       String      // Ex: "CEDP"
+  formato     String      // Ex: "#{seq:3}/#{sigla}" -> "007/CEDP"
+  resetPolicy ResetPolicy @default(ANNUAL)
+  isActive    Boolean     @default(true) @map("is_active")
+  createdBy   String      @map("created_by")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  // Relacionamentos
+  creator User @relation("SeriesCreatedBy", fields: [createdBy], references: [id])
+  counters Counter[]
+  numbers DocNumber[]
+
+  @@map("series")
+}
+
+model Counter {
+  id         String @id @default(cuid())
+  seriesId   String @map("series_id")
+  year       Int
+  currentSeq Int    @default(0) @map("current_seq")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  // Relacionamentos
+  series Series @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+
+  @@unique([seriesId, year])
+  @@map("counters")
+}
+
+model DocNumber {
+  id          String        @id @default(cuid())
+  seriesId    String        @map("series_id")
+  year        Int
+  seq         Int
+  formatted   String        // Ex: "007/CEDP"
+  state       NumberState   @default(RESERVED)
+  metadata    Json?         // Metadados adicionais (processo, interessado, assunto)
+  
+  // Campos de auditoria
+  reservedBy  String?       @map("reserved_by")
+  reservedAt  DateTime?     @map("reserved_at")
+  issuedBy    String?       @map("issued_by")
+  issuedAt    DateTime?     @map("issued_at")
+  voidedBy    String?       @map("voided_by")
+  voidedAt    DateTime?     @map("voided_at")
+  voidReason  String?       @map("void_reason")
+  
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  // Relacionamentos
+  series Series @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  reservedByUser User? @relation("NumbersReservedBy", fields: [reservedBy], references: [id])
+  issuedByUser User? @relation("NumbersIssuedBy", fields: [issuedBy], references: [id])
+  voidedByUser User? @relation("NumbersVoidedBy", fields: [voidedBy], references: [id])
+
+  @@unique([seriesId, year, seq])
+  @@map("doc_numbers")
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  entity    String   // "Series", "DocNumber", etc.
+  entityId  String   @map("entity_id")
+  action    String   // "CREATE", "UPDATE", "DELETE", "RESERVE", "ISSUE", "VOID"
+  diff      Json?    // Diferenças entre estados
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relacionamentos
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("audit_logs")
+}
+
+// Enums
+enum UserRole {
+  ADMIN
+  EDITOR
+  READER
+}
+
+enum ResetPolicy {
+  ANNUAL    // Reinicia em 1 no 1º dia do ano
+  CONTINUOUS // Não reinicia
+}
+
+enum NumberState {
+  RESERVED  // Reservado
+  ISSUED    // Emitido
+  VOIDED    // Anulado
+}

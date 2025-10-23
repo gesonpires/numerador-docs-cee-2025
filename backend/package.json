@@ -1,0 +1,41 @@
+{
+  "name": "cee-sc-backend",
+  "version": "1.0.0",
+  "description": "Backend API para o sistema de numeração de documentos do CEE-SC",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p .",
+    "start": "node dist/server.js",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:studio": "prisma studio",
+    "prisma:generate": "prisma generate",
+    "prisma:seed": "tsx prisma/seed.ts"
+  },
+  "keywords": [
+    "cee-sc",
+    "numerador",
+    "documentos",
+    "api"
+  ],
+  "author": "CEE-SC",
+  "license": "MIT",
+  "dependencies": {
+    "fastify": "^4.24.3",
+    "@fastify/cors": "^8.4.0",
+    "zod": "^3.22.4",
+    "cors": "^2.8.5",
+    "pino": "^8.16.2",
+    "pino-pretty": "^10.2.3",
+    "prisma": "^5.7.1",
+    "@prisma/client": "^5.7.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3",
+    "tsx": "^4.6.2",
+    "@types/node": "^20.10.5"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  }
+}
