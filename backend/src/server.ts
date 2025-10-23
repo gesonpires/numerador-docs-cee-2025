@@ -244,3 +244,54 @@ fastify.get('/api/reports/summary', async (request, reply) => {
         return { error: 'Erro interno do servidor' };
     }
 });
+
+// Rota para atualizar série
+fastify.put('/api/series/:id', async (request, reply) => {
+    try {
+        const { id } = request.params as { id: string };
+        const data = request.body as any;
+        
+        const updatedSeries = await prisma.series.update({
+            where: { id },
+            data: {
+                name: data.name,
+                sigla: data.sigla,
+                formato: data.formato,
+                tipo: data.tipo,
+                isActive: data.isActive
+            }
+        });
+        
+        return { data: updatedSeries };
+    } catch (error) {
+        reply.code(500);
+        return { error: 'Erro ao atualizar série' };
+    }
+});
+
+// Rota para excluir série
+fastify.delete('/api/series/:id', async (request, reply) => {
+    try {
+        const { id } = request.params as { id: string };
+        
+        // Verificar se a série tem números associados
+        const numbersCount = await prisma.docNumber.count({
+            where: { seriesId: id }
+        });
+        
+        if (numbersCount > 0) {
+            reply.code(400);
+            return { error: 'Não é possível excluir série com números associados' };
+        }
+        
+        await prisma.series.delete({
+            where: { id }
+        });
+        
+        return { message: 'Série excluída com sucesso' };
+    } catch (error) {
+        reply.code(500);
+        return { error: 'Erro ao excluir série' };
+    }
+});
+
