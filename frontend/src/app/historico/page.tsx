@@ -11,6 +11,8 @@ export default function HistoricoPage() {
     const [numbers, setNumbers] = useState<DocNumber[]>([]);
     const [series, setSeries] = useState<Series[]>([]);
     const [loading, setLoading] = useState(false);
+    const [selectedNumber, setSelectedNumber] = useState<DocNumber | null>(null);
+    const [showModal, setShowModal] = useState(false);
     const [pagination, setPagination] = useState({
         page: 1,
         limit: 20,
@@ -77,6 +79,16 @@ export default function HistoricoPage() {
             q: ''
         });
         setPagination(prev => ({ ...prev, page: 1 }));
+    };
+
+    const viewDetails = (number: DocNumber) => {
+        setSelectedNumber(number);
+        setShowModal(true);
+    };
+
+    const closeModal = () => {
+        setShowModal(false);
+        setSelectedNumber(null);
     };
 
     const exportToCSV = () => {
@@ -258,7 +270,12 @@ export default function HistoricoPage() {
                                             </p>
                                         </div>
                                         <div className="flex gap-2">
-                                            <Button variant="outline" size="sm">
+                                            <Button 
+                                                variant="outline" 
+                                                size="sm" 
+                                                onClick={() => viewDetails(number)}
+                                                title="Ver detalhes"
+                                            >
                                                 <Eye className="h-4 w-4" />
                                             </Button>
                                             {number.state !== 'VOIDED' && (
@@ -266,6 +283,7 @@ export default function HistoricoPage() {
                                                     variant="outline" 
                                                     size="sm" 
                                                     onClick={() => voidNumber(number.id)}
+                                                    title="Anular número"
                                                 >
                                                     <X className="h-4 w-4" />
                                                 </Button>
@@ -278,6 +296,88 @@ export default function HistoricoPage() {
                     </CardContent>
                 </Card>
             </div>
+
+            {/* Modal de Detalhes */}
+            {showModal && selectedNumber && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+                        <div className="flex justify-between items-center mb-4">
+                            <h2 className="text-2xl font-bold">Detalhes do Número</h2>
+                            <Button variant="outline" onClick={closeModal}>
+                                <X className="h-4 w-4" />
+                            </Button>
+                        </div>
+                        
+                        <div className="space-y-4">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="text-sm font-medium text-gray-600">Número</label>
+                                    <p className="text-lg font-semibold">{selectedNumber.formatted}</p>
+                                </div>
+                                <div>
+                                    <label className="text-sm font-medium text-gray-600">Estado</label>
+                                    <span className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${
+                                        selectedNumber.state === 'ISSUED' ? 'bg-green-100 text-green-800' :
+                                        selectedNumber.state === 'RESERVED' ? 'bg-yellow-100 text-yellow-800' :
+                                        'bg-red-100 text-red-800'
+                                    }`}>
+                                        {selectedNumber.state === 'ISSUED' ? 'Emitido' :
+                                         selectedNumber.state === 'RESERVED' ? 'Reservado' : 'Anulado'}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="text-sm font-medium text-gray-600">Série</label>
+                                    <p>{selectedNumber.series?.name || 'N/A'}</p>
+                                </div>
+                                <div>
+                                    <label className="text-sm font-medium text-gray-600">Ano</label>
+                                    <p>{selectedNumber.year}</p>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="text-sm font-medium text-gray-600">Data de Criação</label>
+                                <p>{new Date(selectedNumber.createdAt).toLocaleString('pt-BR')}</p>
+                            </div>
+
+                            {selectedNumber.metadata && (
+                                <div className="border-t pt-4">
+                                    <h3 className="text-lg font-semibold mb-3">Metadados</h3>
+                                    <div className="grid grid-cols-1 gap-3">
+                                        {selectedNumber.metadata.processo && (
+                                            <div>
+                                                <label className="text-sm font-medium text-gray-600">Processo</label>
+                                                <p>{selectedNumber.metadata.processo}</p>
+                                            </div>
+                                        )}
+                                        {selectedNumber.metadata.interessado && (
+                                            <div>
+                                                <label className="text-sm font-medium text-gray-600">Interessado</label>
+                                                <p>{selectedNumber.metadata.interessado}</p>
+                                            </div>
+                                        )}
+                                        {selectedNumber.metadata.assunto && (
+                                            <div>
+                                                <label className="text-sm font-medium text-gray-600">Assunto</label>
+                                                <p>{selectedNumber.metadata.assunto}</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="flex justify-end gap-2 pt-4 border-t">
+                                <Button variant="outline" onClick={closeModal}>
+                                    Fechar
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
