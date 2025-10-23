@@ -52,7 +52,11 @@ export default function HistoricoPage() {
                 limit: pagination.limit
             });
             setNumbers(response.data);
-            setPagination(response.pagination);
+            setPagination(prev => ({
+                ...prev,
+                total: response.pagination.total,
+                totalPages: response.pagination.pages
+            }));
         } catch (error) {
             console.error('Erro ao carregar números:', error);
         } finally {
@@ -60,35 +64,58 @@ export default function HistoricoPage() {
         }
     };
 
-    const handleVoidNumber = async (numberId: string) => {
-        const reason = prompt('Motivo da anulação:');
-        if (!reason) return;
+    const handleSearch = () => {
+        setPagination(prev => ({ ...prev, page: 1 }));
+        loadNumbers();
+    };
 
+    const handleClear = () => {
+        setFilters({
+            seriesId: '',
+            year: new Date().getFullYear(),
+            state: '',
+            q: ''
+        });
+        setPagination(prev => ({ ...prev, page: 1 }));
+    };
+
+    const exportToCSV = () => {
+        if (numbers.length === 0) {
+            alert('Nenhum número para exportar');
+            return;
+        }
+
+        const csvContent = [
+            ['Número', 'Série', 'Estado', 'Data Criação', 'Processo', 'Interessado', 'Assunto'],
+            ...numbers.map(num => [
+                num.formatted,
+                num.series?.name || '',
+                num.state,
+                new Date(num.createdAt).toLocaleDateString('pt-BR'),
+                num.metadata?.processo || '',
+                num.metadata?.interessado || '',
+                num.metadata?.assunto || ''
+            ])
+        ].map(row => row.join(',')).join('\n');
+        
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `historico_numeros_${new Date().toISOString().split('T')[0]}.csv`;
+        a.click();
+        window.URL.revokeObjectURL(url);
+    };
+
+    const voidNumber = async (id: string) => {
+        if (!confirm('Tem certeza que deseja anular este número?')) return;
+        
         try {
-            await apiClient.voidNumber(numberId, { reason });
-            loadNumbers(); // Recarregar lista
-            alert('Número anulado com sucesso!');
+            await apiClient.voidNumber(id, { reason: 'Anulado pelo usuário' });
+            loadNumbers();
         } catch (error) {
             console.error('Erro ao anular número:', error);
             alert('Erro ao anular número');
-        }
-    };
-
-    const getStateColor = (state: string) => {
-        switch (state) {
-            case 'RESERVED': return 'bg-yellow-100 text-yellow-800';
-            case 'ISSUED': return 'bg-green-100 text-green-800';
-            case 'VOIDED': return 'bg-red-100 text-red-800';
-            default: return 'bg-gray-100 text-gray-800';
-        }
-    };
-
-    const getStateLabel = (state: string) => {
-        switch (state) {
-            case 'RESERVED': return 'Reservado';
-            case 'ISSUED': return 'Emitido';
-            case 'VOIDED': return 'Anulado';
-            default: return state;
         }
     };
 
@@ -99,179 +126,158 @@ export default function HistoricoPage() {
                     Histórico de Números
                 </h1>
                 <p className="text-muted-foreground">
-                    Consulte e gerencie números de documentos
+                    Visualize e gerencie números de documentos
                 </p>
             </div>
 
-            {/* Filtros */}
-            <Card className="mb-6">
-                <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                        <Filter className="h-5 w-5" />
-                        Filtros
-                    </CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                        <div>
-                            <label className="text-sm font-medium">Série</label>
-                            <select
-                                className="w-full mt-1 p-2 border rounded-md"
-                                value={filters.seriesId}
-                                onChange={(e) => setFilters(prev => ({ ...prev, seriesId: e.target.value }))}
-                            >
-                                <option value="">Todas as séries</option>
-                                {series.map(s => (
-                                    <option key={s.id} value={s.id}>{s.name}</option>
-                                ))}
-                            </select>
-                        </div>
-
-                        <div>
-                            <label className="text-sm font-medium">Ano</label>
-                            <input
-                                type="number"
-                                className="w-full mt-1 p-2 border rounded-md"
-                                value={filters.year}
-                                onChange={(e) => setFilters(prev => ({ ...prev, year: parseInt(e.target.value) }))}
-                            />
-                        </div>
-
-                        <div>
-                            <label className="text-sm font-medium">Estado</label>
-                            <select
-                                className="w-full mt-1 p-2 border rounded-md"
-                                value={filters.state}
-                                onChange={(e) => setFilters(prev => ({ ...prev, state: e.target.value }))}
-                            >
-                                <option value="">Todos os estados</option>
-                                <option value="RESERVED">Reservado</option>
-                                <option value="ISSUED">Emitido</option>
-                                <option value="VOIDED">Anulado</option>
-                            </select>
-                        </div>
-
-                        <div>
-                            <label className="text-sm font-medium">Busca</label>
-                            <div className="relative mt-1">
-                                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+            <div className="grid gap-6">
+                {/* Filtros */}
+                <Card>
+                    <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                            <Filter className="h-5 w-5" />
+                            Filtros
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                            <div>
+                                <label className="text-sm font-medium">Série</label>
+                                <select
+                                    className="w-full p-2 border rounded-md"
+                                    value={filters.seriesId}
+                                    onChange={(e) => setFilters({...filters, seriesId: e.target.value})}
+                                >
+                                    <option value="">Todas as séries</option>
+                                    {series.map(s => (
+                                        <option key={s.id} value={s.id}>{s.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="text-sm font-medium">Ano</label>
+                                <input
+                                    type="number"
+                                    className="w-full p-2 border rounded-md"
+                                    value={filters.year}
+                                    onChange={(e) => setFilters({...filters, year: parseInt(e.target.value)})}
+                                />
+                            </div>
+                            <div>
+                                <label className="text-sm font-medium">Estado</label>
+                                <select
+                                    className="w-full p-2 border rounded-md"
+                                    value={filters.state}
+                                    onChange={(e) => setFilters({...filters, state: e.target.value})}
+                                >
+                                    <option value="">Todos os estados</option>
+                                    <option value="RESERVED">Reservado</option>
+                                    <option value="ISSUED">Emitido</option>
+                                    <option value="VOIDED">Anulado</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="text-sm font-medium">Busca</label>
                                 <input
                                     type="text"
-                                    className="w-full pl-8 pr-2 py-2 border rounded-md"
+                                    className="w-full p-2 border rounded-md"
                                     placeholder="Número ou metadados..."
                                     value={filters.q}
-                                    onChange={(e) => setFilters(prev => ({ ...prev, q: e.target.value }))}
+                                    onChange={(e) => setFilters({...filters, q: e.target.value})}
                                 />
                             </div>
                         </div>
-                    </div>
-
-                    <div className="flex gap-2 mt-4">
-                        <Button onClick={loadNumbers} disabled={loading}>
-                            <Search className="mr-2 h-4 w-4" />
-                            {loading ? 'Buscando...' : 'Buscar'}
-                        </Button>
-                        <Button variant="outline" onClick={() => setFilters({ seriesId: '', year: new Date().getFullYear(), state: '', q: '' })}>
-                            Limpar
-                        </Button>
-                    </div>
-                </CardContent>
-            </Card>
-
-            {/* Lista de Números */}
-            <Card>
-                <CardHeader>
-                    <CardTitle className="flex items-center justify-between">
-                        <span>Números Encontrados ({pagination.total})</span>
-                        <Button variant="outline" size="sm">
-                            <Download className="mr-2 h-4 w-4" />
-                            Exportar
-                        </Button>
-                    </CardTitle>
-                </CardHeader>
-                <CardContent>
-                    {loading ? (
-                        <div className="text-center py-8">
-                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
-                            <p className="mt-2 text-muted-foreground">Carregando...</p>
+                        <div className="flex gap-2">
+                            <Button onClick={handleSearch}>
+                                <Search className="mr-2 h-4 w-4" />
+                                Buscar
+                            </Button>
+                            <Button variant="outline" onClick={handleClear}>
+                                Limpar
+                            </Button>
                         </div>
-                    ) : numbers.length === 0 ? (
-                        <div className="text-center py-8">
-                            <p className="text-muted-foreground">Nenhum número encontrado</p>
-                        </div>
-                    ) : (
-                        <div className="space-y-2">
-                            {numbers.map(number => (
-                                <div key={number.id} className="flex items-center justify-between p-4 border rounded-lg">
-                                    <div className="flex-1">
-                                        <div className="flex items-center gap-3">
-                                            <div className="font-mono font-bold text-lg">{number.formatted}</div>
-                                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStateColor(number.state)}`}>
-                                                {getStateLabel(number.state)}
-                                            </span>
-                                        </div>
-                                        <div className="text-sm text-muted-foreground mt-1">
-                                            {number.series?.name} • {number.year}
-                                        </div>
-                                        {number.metadata && (
-                                            <div className="text-sm text-muted-foreground mt-1">
-                                                {number.metadata.processo && `Processo: ${number.metadata.processo}`}
-                                                {number.metadata.interessado && ` • Interessado: ${number.metadata.interessado}`}
+                    </CardContent>
+                </Card>
+
+                {/* Lista de Números */}
+                <Card>
+                    <CardHeader>
+                        <CardTitle className="flex items-center justify-between">
+                            <span>Números Encontrados ({pagination.total})</span>
+                            <Button variant="outline" size="sm" onClick={exportToCSV}>
+                                <Download className="mr-2 h-4 w-4" />
+                                Exportar
+                            </Button>
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        {loading ? (
+                            <div className="text-center py-8">
+                                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+                                <p className="mt-2 text-muted-foreground">Carregando...</p>
+                            </div>
+                        ) : numbers.length === 0 ? (
+                            <div className="text-center py-8">
+                                <p className="text-muted-foreground">Nenhum número encontrado</p>
+                            </div>
+                        ) : (
+                            <div className="space-y-4">
+                                {numbers.map((number) => (
+                                    <div key={number.id} className="flex items-center justify-between p-4 border rounded-lg">
+                                        <div className="flex-1">
+                                            <div className="flex items-center gap-2 mb-2">
+                                                <h3 className="font-semibold text-lg">{number.formatted}</h3>
+                                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                                    number.state === 'ISSUED' ? 'bg-green-100 text-green-800' :
+                                                    number.state === 'RESERVED' ? 'bg-yellow-100 text-yellow-800' :
+                                                    'bg-red-100 text-red-800'
+                                                }`}>
+                                                    {number.state === 'ISSUED' ? 'Emitido' :
+                                                     number.state === 'RESERVED' ? 'Reservado' : 'Anulado'}
+                                                </span>
                                             </div>
-                                        )}
-                                        <div className="text-xs text-muted-foreground mt-1">
-                                            {number.state === 'RESERVED' && number.reservedAt && `Reservado em: ${new Date(number.reservedAt).toLocaleString()}`}
-                                            {number.state === 'ISSUED' && number.issuedAt && `Emitido em: ${new Date(number.issuedAt).toLocaleString()}`}
-                                            {number.state === 'VOIDED' && number.voidedAt && `Anulado em: ${new Date(number.voidedAt).toLocaleString()}`}
+                                            <p className="text-sm text-muted-foreground">
+                                                {number.series?.name} • {number.year}
+                                            </p>
+                                            {number.metadata && (
+                                                <div className="mt-2 text-sm">
+                                                    {number.metadata.processo && (
+                                                        <p><strong>Processo:</strong> {number.metadata.processo}</p>
+                                                    )}
+                                                    {number.metadata.interessado && (
+                                                        <p><strong>Interessado:</strong> {number.metadata.interessado}</p>
+                                                    )}
+                                                    {number.metadata.assunto && (
+                                                        <p><strong>Assunto:</strong> {number.metadata.assunto}</p>
+                                                    )}
+                                                </div>
+                                            )}
+                                            <p className="text-xs text-muted-foreground mt-2">
+                                                {number.state === 'ISSUED' ? 'Emitido em:' :
+                                                 number.state === 'RESERVED' ? 'Reservado em:' : 'Anulado em:'} {new Date(number.createdAt).toLocaleString('pt-BR')}
+                                            </p>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <Button variant="outline" size="sm">
+                                                <Eye className="h-4 w-4" />
+                                            </Button>
+                                            {number.state !== 'VOIDED' && (
+                                                <Button 
+                                                    variant="outline" 
+                                                    size="sm" 
+                                                    onClick={() => voidNumber(number.id)}
+                                                >
+                                                    <X className="h-4 w-4" />
+                                                </Button>
+                                            )}
                                         </div>
                                     </div>
-                                    <div className="flex gap-2">
-                                        <Button variant="outline" size="sm">
-                                            <Eye className="h-4 w-4" />
-                                        </Button>
-                                        {number.state !== 'VOIDED' && (
-                                            <Button
-                                                variant="outline"
-                                                size="sm"
-                                                onClick={() => handleVoidNumber(number.id)}
-                                            >
-                                                <X className="h-4 w-4" />
-                                            </Button>
-                                        )}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-
-                    {/* Paginação */}
-                    {pagination.totalPages > 1 && (
-                        <div className="flex items-center justify-between mt-6">
-                            <div className="text-sm text-muted-foreground">
-                                Página {pagination.page} de {pagination.totalPages}
+                                ))}
                             </div>
-                            <div className="flex gap-2">
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    disabled={pagination.page === 1}
-                                    onClick={() => setPagination(prev => ({ ...prev, page: prev.page - 1 }))}
-                                >
-                                    Anterior
-                                </Button>
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    disabled={pagination.page === pagination.totalPages}
-                                    onClick={() => setPagination(prev => ({ ...prev, page: prev.page + 1 }))}
-                                >
-                                    Próxima
-                                </Button>
-                            </div>
-                        </div>
-                    )}
-                </CardContent>
-            </Card>
+                        )}
+                    </CardContent>
+                </Card>
+            </div>
         </div>
     );
 }
